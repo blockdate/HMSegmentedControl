@@ -49,6 +49,9 @@
         NSAttributedString *attString = [[NSAttributedString alloc] initWithString:title attributes:@{NSForegroundColorAttributeName : [UIColor blueColor]}];
         return attString;
     }];
+    segmentedControl1.indexSameTapedBlock = ^(NSInteger index) {
+        NSLog(@"taped same index :%@", @(index));
+    };
     [segmentedControl1 addTarget:self action:@selector(segmentedControlChangedValue:) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:segmentedControl1];
     

@@ -63,6 +63,11 @@ typedef NS_ENUM(NSInteger, HMSegmentedControlType) {
 @property (nonatomic, copy) IndexChangeBlock indexChangeBlock;
 
 /**
+ Provide a block to be executed when taped same index
+ */
+@property (nonatomic, copy) IndexChangeBlock indexSameTapedBlock;
+
+/**
  Used to apply custom text styling to titles when set.
  
  When this block is set, no additional styling is applied to the `NSAttributedString` object returned from this block.

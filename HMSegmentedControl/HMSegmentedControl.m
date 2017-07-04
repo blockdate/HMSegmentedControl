@@ -22,6 +22,8 @@
 @property (nonatomic, readwrite) NSArray<NSNumber *> *segmentWidthsArray;
 @property (nonatomic, strong) HMScrollView *scrollView;
 
+//@property (nonatomic, strong) NSMutableDictionary *indexFrameCacheMap;
+
 @end
 
 @implementation HMScrollView
@@ -52,7 +54,11 @@
 
 @end
 
-@implementation HMSegmentedControl
+@implementation HMSegmentedControl{
+    NSInteger _currnetScrollingIndicatorToIndex;
+    CGRect _currentScrollingIndecatorToFrame;
+    CGRect _currentScrollingIndecatorFromFrame;
+}
 
 - (id)initWithCoder:(NSCoder *)aDecoder {
     self = [super initWithCoder:aDecoder];
@@ -151,6 +157,8 @@
     self.borderWidth = 1.0f;
     
     self.shouldAnimateUserSelection = YES;
+    
+    _currnetScrollingIndicatorToIndex = -1;
     
     self.selectionIndicatorArrowLayer = [CALayer layer];
     self.selectionIndicatorStripLayer = [CALayer layer];
@@ -541,6 +549,67 @@
     self.selectionIndicatorArrowLayer.mask = maskLayer;
 }
 
+- (CGRect)frameForTargetIndicator:(NSInteger)targetIndex {
+    CGFloat indicatorYOffset = 0.0f;
+    
+    if (self.selectionIndicatorLocation == HMSegmentedControlSelectionIndicatorLocationDown) {
+        indicatorYOffset = self.bounds.size.height - self.selectionIndicatorHeight + self.selectionIndicatorEdgeInsets.bottom;
+    }
+    
+    if (self.selectionIndicatorLocation == HMSegmentedControlSelectionIndicatorLocationUp) {
+        indicatorYOffset = self.selectionIndicatorEdgeInsets.top;
+    }
+    
+    CGFloat sectionWidth = 0.0f;
+    
+    if (self.type == HMSegmentedControlTypeText) {
+        CGFloat stringWidth = [self measureTitleAtIndex:targetIndex].width;
+        sectionWidth = stringWidth;
+    } else if (self.type == HMSegmentedControlTypeImages) {
+        UIImage *sectionImage = [self.sectionImages objectAtIndex:targetIndex];
+        CGFloat imageWidth = sectionImage.size.width;
+        sectionWidth = imageWidth;
+    } else if (self.type == HMSegmentedControlTypeTextImages) {
+        CGFloat stringWidth = [self measureTitleAtIndex:targetIndex].width;
+        UIImage *sectionImage = [self.sectionImages objectAtIndex:targetIndex];
+        CGFloat imageWidth = sectionImage.size.width;
+        sectionWidth = MAX(stringWidth, imageWidth);
+    }
+    
+    if (self.selectionStyle == HMSegmentedControlSelectionStyleArrow) {
+        CGFloat widthToEndOfSelectedSegment = (self.segmentWidth * targetIndex) + self.segmentWidth;
+        CGFloat widthToStartOfSelectedIndex = (self.segmentWidth * targetIndex);
+        
+        CGFloat x = widthToStartOfSelectedIndex + ((widthToEndOfSelectedSegment - widthToStartOfSelectedIndex) / 2) - (self.selectionIndicatorHeight/2);
+        return CGRectMake(x - (self.selectionIndicatorHeight / 2), indicatorYOffset, self.selectionIndicatorHeight * 2, self.selectionIndicatorHeight);
+    } else {
+        if (self.selectionStyle == HMSegmentedControlSelectionStyleTextWidthStripe &&
+            sectionWidth <= self.segmentWidth &&
+            self.segmentWidthStyle != HMSegmentedControlSegmentWidthStyleDynamic) {
+            CGFloat widthToEndOfSelectedSegment = (self.segmentWidth * targetIndex) + self.segmentWidth;
+            CGFloat widthToStartOfSelectedIndex = (self.segmentWidth * targetIndex);
+            
+            CGFloat x = ((widthToEndOfSelectedSegment - widthToStartOfSelectedIndex) / 2) + (widthToStartOfSelectedIndex - sectionWidth / 2);
+            return CGRectMake(x + self.selectionIndicatorEdgeInsets.left, indicatorYOffset, sectionWidth - self.selectionIndicatorEdgeInsets.right, self.selectionIndicatorHeight);
+        } else {
+            if (self.segmentWidthStyle == HMSegmentedControlSegmentWidthStyleDynamic) {
+                CGFloat selectedSegmentOffset = 0.0f;
+                
+                NSInteger i = 0;
+                for (NSNumber *width in self.segmentWidthsArray) {
+                    if (targetIndex == i)
+                        break;
+                    selectedSegmentOffset = selectedSegmentOffset + [width floatValue];
+                    i++;
+                }
+                return CGRectMake(selectedSegmentOffset + self.selectionIndicatorEdgeInsets.left, indicatorYOffset, [[self.segmentWidthsArray objectAtIndex:targetIndex] floatValue] - self.selectionIndicatorEdgeInsets.right, self.selectionIndicatorHeight + self.selectionIndicatorEdgeInsets.bottom);
+            }
+            
+            return CGRectMake((self.segmentWidth + self.selectionIndicatorEdgeInsets.left) * targetIndex, indicatorYOffset, self.segmentWidth - self.selectionIndicatorEdgeInsets.right, self.selectionIndicatorHeight);
+        }
+    }
+}
+
 - (CGRect)frameForSelectionIndicator {
     CGFloat indicatorYOffset = 0.0f;
     
@@ -747,6 +816,130 @@
 
 #pragma mark - Scrolling
 
+-(void)updateselectLineFrameWithoffset:(CGFloat)offsetx{
+    //now only text was avaliable
+    if (self.type != HMSegmentedControlTypeText) {
+        return;
+    }
+    if (self.selectionStyle != HMSegmentedControlSelectionStyleTextWidthStripe && self.selectionStyle != HMSegmentedControlSelectionStyleFullWidthStripe) {
+        return;
+    }
+    CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+    if (self.sectionTitles.count * screenWidth < offsetx || offsetx < 0) {
+//        out of bound
+        return ;
+    }
+    
+    if (fmod(offsetx, screenWidth) == 0) {
+        return;
+    }
+    
+    BOOL scrollFromRightToLeft = offsetx <= self.selectedSegmentIndex * [UIScreen mainScreen].bounds.size.width; //是否从右往左滑动，index--
+    
+    if (scrollFromRightToLeft) {
+        if (self.selectedSegmentIndex == 0) {
+            return;
+        }
+    }else {
+        if (self.selectedSegmentIndex == self.sectionTitles.count - 1) {
+            return;
+        }
+    }
+    
+    NSMutableDictionary *newActions = [[NSMutableDictionary alloc] initWithObjectsAndKeys:[NSNull null], @"position", [NSNull null], @"bounds", nil];
+
+    CGFloat targetWidth;
+    CGFloat fromWidth;
+    
+    
+    if (self.segmentWidthsArray != nil && self.segmentWidthsArray.count != 0) {
+        targetWidth = scrollFromRightToLeft ? self.segmentWidthsArray[self.selectedSegmentIndex - 1].floatValue : self.segmentWidthsArray[self.selectedSegmentIndex + 1].floatValue;
+        fromWidth = self.segmentWidthsArray[self.selectedSegmentIndex + 1].floatValue;
+    }else {
+        targetWidth = self.segmentWidth;
+        fromWidth = self.segmentWidth;
+    }
+    
+    if (scrollFromRightToLeft) {
+        //从左往右滑动，index减少
+        //目标index
+        NSInteger targetIndex = self.selectedSegmentIndex - 1;
+        if (targetIndex != _currnetScrollingIndicatorToIndex) {
+            //获取目标frame
+            _currentScrollingIndecatorToFrame = [self frameForTargetIndicator:targetIndex];
+            _currentScrollingIndecatorFromFrame = [self frameForSelectionIndicator];
+        }
+        
+        CGRect frameRight = _currentScrollingIndecatorFromFrame;
+        CGRect frameLeft = _currentScrollingIndecatorToFrame;
+        //完成位移动画总共所需要移动的距离-x的位移距离加上width的位移量, 计算式为 2*(r.x-l.x) + r.w - l.w
+        CGFloat totalDistance = 2 * ( frameRight.origin.x - frameLeft.origin.x ) + frameRight.size.width - frameLeft.size.width;
+        //换算scroll 在屏幕上的偏移量至动画总移动总量
+        CGFloat offsetInSelf = (screenWidth - fmod(offsetx, screenWidth))/screenWidth * totalDistance;
+        //x坐标点位移距离
+        CGFloat offsetX = (frameRight.origin.x - frameLeft.origin.x) * offsetInSelf/totalDistance * 2 ;
+        //宽度位移距离
+        CGFloat offsetWidth = ((offsetInSelf - totalDistance/2)/(totalDistance/2)) * (frameRight.origin.x - frameLeft.origin.x - frameLeft.size.width + frameRight.size.width);
+        
+        CGRect f = self.selectionIndicatorStripLayer.frame;
+        //偏移量超过一半时x固定缩小宽度，否则左移x并相应增大宽度
+        if (offsetInSelf >= totalDistance / 2) {
+            f.origin.x = frameLeft.origin.x;
+            f.size.width = frameRight.origin.x - frameLeft.origin.x + frameRight.size.width - fabs(offsetWidth);
+        }else {
+            f.origin.x = frameRight.origin.x - offsetX;
+            f.size.width = offsetX + frameRight.size.width;
+        }
+        //去除layer的动画效果
+        self.selectionIndicatorStripLayer.actions = newActions;
+        //设置frame使过程生效
+        self.selectionIndicatorStripLayer.frame = f;
+        if (offsetInSelf >= totalDistance - 8) {
+            [self setSelectedSegmentIndex:targetIndex animated:NO];
+        }
+    }else {
+        
+        
+        //从左往右滑动，index增加
+        //目标index
+        NSInteger targetIndex = self.selectedSegmentIndex + 1;
+        if (targetIndex != _currnetScrollingIndicatorToIndex) {
+            //获取目标frame
+            _currentScrollingIndecatorToFrame = [self frameForTargetIndicator:targetIndex];
+            _currentScrollingIndecatorFromFrame = [self frameForSelectionIndicator];
+        }
+        
+        CGRect frameRight = _currentScrollingIndecatorToFrame;
+        CGRect frameLeft = _currentScrollingIndecatorFromFrame;
+        //完成位移动画总共所需要移动的距离-x的位移距离加上width的位移量, 计算式为 2*(r.x-l.x) + r.w - l.w
+        CGFloat totalDistance = 2 * ( frameRight.origin.x - frameLeft.origin.x ) + frameRight.size.width - frameLeft.size.width;
+        //换算scroll 在屏幕上的偏移量至动画总移动总量
+        CGFloat offsetInSelf = fmod(offsetx, screenWidth)/screenWidth * totalDistance;
+        //x坐标点位移距离
+        CGFloat offsetX = offsetInSelf <= totalDistance/2 ? 0 : (frameRight.origin.x - frameLeft.origin.x) * (1 - offsetInSelf/totalDistance) * 2 ;
+        //宽度位移距离
+        CGFloat offsetWidth = (offsetInSelf/(totalDistance/2)) * (frameRight.origin.x - frameLeft.origin.x - frameLeft.size.width + frameRight.size.width);
+        
+        CGRect f = self.selectionIndicatorStripLayer.frame;
+        //偏移量超过一半时x右移缩小宽度，否则x固定增大宽度
+        if (offsetInSelf >= totalDistance / 2) {
+            f.origin.x = frameRight.origin.x - offsetX;
+            f.size.width = frameRight.origin.x - f.origin.x + frameRight.size.width ;
+        }else {
+            f.origin.x = frameLeft.origin.x ;
+            f.size.width = frameLeft.size.width + fabs(offsetWidth);
+        }
+        //去除layer的动画效果
+        self.selectionIndicatorStripLayer.actions = newActions;
+        //设置frame使过程生效
+        self.selectionIndicatorStripLayer.frame = f;
+        if (offsetInSelf >= totalDistance - 8) {
+            [self setSelectedSegmentIndex:targetIndex animated:NO];
+        }
+        
+    }
+}
+
 - (CGFloat)totalSegmentedControlWidth {
     if (self.type == HMSegmentedControlTypeText && self.segmentWidthStyle == HMSegmentedControlSegmentWidthStyleFixed) {
         return self.sectionTitles.count * self.segmentWidth;
@@ -848,27 +1041,38 @@
             [CATransaction begin];
             [CATransaction setAnimationDuration:0.15f];
             [CATransaction setAnimationTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear]];
-            [self setArrowFrame];
-            self.selectionIndicatorBoxLayer.frame = [self frameForSelectionIndicator];
-            self.selectionIndicatorStripLayer.frame = [self frameForSelectionIndicator];
-            self.selectionIndicatorStripLayer.cornerRadius = self.selectionIndicatorStripLayer.frame.size.height/2;
-            self.selectionIndicatorBoxLayer.frame = [self frameForFillerSelectionIndicator];
+            if (self.selectionStyle == HMSegmentedControlSelectionStyleArrow) {
+                [self setArrowFrame];
+            }else if (self.selectionStyle == HMSegmentedControlSelectionStyleFullWidthStripe || self.selectionStyle == HMSegmentedControlSelectionStyleTextWidthStripe) {
+                self.selectionIndicatorStripLayer.frame = [self frameForSelectionIndicator];
+                self.selectionIndicatorStripLayer.cornerRadius = self.selectionIndicatorStripLayer.frame.size.height/2;
+            }else {
+//                box
+//                self.selectionIndicatorBoxLayer.frame = [self frameForSelectionIndicator];
+                self.selectionIndicatorBoxLayer.frame = [self frameForFillerSelectionIndicator];
+            }
+//
+//
             [CATransaction commit];
         } else {
             // Disable CALayer animations
             NSMutableDictionary *newActions = [[NSMutableDictionary alloc] initWithObjectsAndKeys:[NSNull null], @"position", [NSNull null], @"bounds", nil];
-            self.selectionIndicatorArrowLayer.actions = newActions;
-            [self setArrowFrame];
             
-            self.selectionIndicatorStripLayer.actions = newActions;
-            self.selectionIndicatorStripLayer.frame = [self frameForSelectionIndicator];
-            self.selectionIndicatorStripLayer.cornerRadius = self.selectionIndicatorStripLayer.frame.size.height/2;
-            
-            self.selectionIndicatorBoxLayer.actions = newActions;
-            self.selectionIndicatorBoxLayer.frame = [self frameForFillerSelectionIndicator];
-            
-            if (notify)
+            if (self.selectionStyle == HMSegmentedControlSelectionStyleArrow) {
+                [self setArrowFrame];
+                self.selectionIndicatorArrowLayer.actions = newActions;
+            }else if (self.selectionStyle == HMSegmentedControlSelectionStyleFullWidthStripe || self.selectionStyle == HMSegmentedControlSelectionStyleTextWidthStripe) {
+                self.selectionIndicatorStripLayer.actions = newActions;
+                self.selectionIndicatorStripLayer.frame = [self frameForSelectionIndicator];
+                self.selectionIndicatorStripLayer.cornerRadius = self.selectionIndicatorStripLayer.frame.size.height/2;
+            }else {
+                //                box
+                self.selectionIndicatorBoxLayer.actions = newActions;
+                self.selectionIndicatorBoxLayer.frame = [self frameForFillerSelectionIndicator];
+            }
+            if (notify) {
                 [self notifyForSegmentChangeToIndex:index];
+            }
         }
     }
 }

@@ -16,11 +16,13 @@
 
 @end
 
-@implementation ViewController
+@implementation ViewController {
+    BOOL _isScrollByTapSegment;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
+    _isScrollByTapSegment = false;
     self.title = @"HMSegmentedControl Demo";
     self.view.backgroundColor = [UIColor whiteColor];
     self.edgesForExtendedLayout = UIRectEdgeNone;
@@ -104,12 +106,13 @@
     self.segmentedControl4.titleTextAttributes = @{NSForegroundColorAttributeName : [UIColor whiteColor]};
     self.segmentedControl4.selectedTitleTextAttributes = @{NSForegroundColorAttributeName : [UIColor colorWithRed:0.1 green:0.1 blue:0.1 alpha:1]};
     self.segmentedControl4.selectionIndicatorColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1];
-    self.segmentedControl4.selectionStyle = HMSegmentedControlSelectionStyleBox;
+    self.segmentedControl4.selectionStyle = HMSegmentedControlSelectionStyleTextWidthStripe;
     self.segmentedControl4.selectionIndicatorLocation = HMSegmentedControlSelectionIndicatorLocationUp;
     self.segmentedControl4.tag = 3;
     
     __weak typeof(self) weakSelf = self;
     [self.segmentedControl4 setIndexChangeBlock:^(NSInteger index) {
+        _isScrollByTapSegment = YES;
         [weakSelf.scrollView scrollRectToVisible:CGRectMake(viewWidth * index, 0, viewWidth, 200) animated:YES];
     }];
     
@@ -161,11 +164,23 @@
 
 #pragma mark - UIScrollViewDelegate
 
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    CGFloat x = scrollView.contentOffset.x;
+    if (!_isScrollByTapSegment) {
+        [self.segmentedControl4 updateselectLineFrameWithoffset:x];
+    }
+}
+
+- (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView {
+    _isScrollByTapSegment = NO;
+}
+
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
     CGFloat pageWidth = scrollView.frame.size.width;
     NSInteger page = scrollView.contentOffset.x / pageWidth;
     
-    [self.segmentedControl4 setSelectedSegmentIndex:page animated:YES];
+    [self.segmentedControl4 setSelectedSegmentIndex:page animated:FALSE];
+    _isScrollByTapSegment = NO;
 }
 
 @end
